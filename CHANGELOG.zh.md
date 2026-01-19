@@ -2,6 +2,12 @@
 
 [English](./CHANGELOG.md) | 中文
 
+## 1.6.0 - 2026-01-19
+
+### 新功能
+- `baoyu-cover-image`：新增 `flat-doodle`（扁平涂鸦）风格——粗黑色轮廓线、明亮粉彩色、简单扁平形状、可爱圆润比例。适合生产力、SaaS、工作流内容。
+- `baoyu-article-illustrator`：新增 `flat-doodle`（扁平涂鸦）风格——同样的视觉风格用于文章插图。
+
 ## 1.5.0 - 2026-01-19
 
 ### 新功能

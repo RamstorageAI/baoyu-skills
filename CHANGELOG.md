@@ -2,6 +2,12 @@
 
 English | [中文](./CHANGELOG.zh.md)
 
+## 1.6.0 - 2026-01-19
+
+### Features
+- `baoyu-cover-image`: adds `flat-doodle` style—bold black outlines, bright pastel colors, simple flat shapes with cute rounded proportions. Best for productivity, SaaS, and workflow content.
+- `baoyu-article-illustrator`: adds `flat-doodle` style—same visual aesthetic for article illustrations.
+
 ## 1.5.0 - 2026-01-19
 
 ### Features
