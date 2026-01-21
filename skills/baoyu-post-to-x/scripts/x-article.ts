@@ -1,12 +1,23 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
 import { parseMarkdown } from './md-to-html.js';
+import {
+  CHROME_CANDIDATES_BASIC,
+  CdpConnection,
+  copyHtmlToClipboard,
+  copyImageToClipboard,
+  findChromeExecutable,
+  getDefaultProfileDir,
+  getFreePort,
+  pasteFromClipboard,
+  sleep,
+  waitForChromeDebugPort,
+} from './x-utils.js';
 
 const X_ARTICLES_URL = 'https://x.com/compose/articles';
 
@@ -41,163 +52,6 @@ const I18N_SELECTORS = {
   ],
 };
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        server.close(() => reject(new Error('Unable to allocate port')));
-        return;
-      }
-      server.close((err) => (err ? reject(err) : resolve(address.port)));
-    });
-  });
-}
-
-function findChromeExecutable(): string | undefined {
-  const override = process.env.X_BROWSER_CHROME_PATH?.trim();
-  if (override && fs.existsSync(override)) return override;
-
-  const candidates: string[] = [];
-  switch (process.platform) {
-    case 'darwin':
-      candidates.push(
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
-        '/Applications/Chromium.app/Contents/MacOS/Chromium',
-      );
-      break;
-    case 'win32':
-      candidates.push(
-        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      );
-      break;
-    default:
-      candidates.push('/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser');
-      break;
-  }
-
-  for (const p of candidates) if (fs.existsSync(p)) return p;
-  return undefined;
-}
-
-function getDefaultProfileDir(): string {
-  const base = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
-  return path.join(base, 'x-browser-profile');
-}
-
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { redirect: 'follow' });
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-  return res.json() as Promise<T>;
-}
-
-async function waitForChromeDebugPort(port: number, timeoutMs: number): Promise<string> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const version = await fetchJson<{ webSocketDebuggerUrl?: string }>(`http://127.0.0.1:${port}/json/version`);
-      if (version.webSocketDebuggerUrl) return version.webSocketDebuggerUrl;
-    } catch {}
-    await sleep(200);
-  }
-  throw new Error('Chrome debug port not ready');
-}
-
-class CdpConnection {
-  private ws: WebSocket;
-  private nextId = 0;
-  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null }>();
-
-  private constructor(ws: WebSocket) {
-    this.ws = ws;
-    this.ws.addEventListener('message', (event) => {
-      try {
-        const data = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data as ArrayBuffer);
-        const msg = JSON.parse(data) as { id?: number; result?: unknown; error?: { message?: string } };
-        if (msg.id) {
-          const pending = this.pending.get(msg.id);
-          if (pending) {
-            this.pending.delete(msg.id);
-            if (pending.timer) clearTimeout(pending.timer);
-            if (msg.error?.message) pending.reject(new Error(msg.error.message));
-            else pending.resolve(msg.result);
-          }
-        }
-      } catch {}
-    });
-    this.ws.addEventListener('close', () => {
-      for (const [id, pending] of this.pending.entries()) {
-        this.pending.delete(id);
-        if (pending.timer) clearTimeout(pending.timer);
-        pending.reject(new Error('CDP connection closed'));
-      }
-    });
-  }
-
-  static async connect(url: string, timeoutMs: number): Promise<CdpConnection> {
-    const ws = new WebSocket(url);
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('CDP connection timeout')), timeoutMs);
-      ws.addEventListener('open', () => { clearTimeout(timer); resolve(); });
-      ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('CDP connection failed')); });
-    });
-    return new CdpConnection(ws);
-  }
-
-  async send<T = unknown>(method: string, params?: Record<string, unknown>, options?: { sessionId?: string; timeoutMs?: number }): Promise<T> {
-    const id = ++this.nextId;
-    const message: Record<string, unknown> = { id, method };
-    if (params) message.params = params;
-    if (options?.sessionId) message.sessionId = options.sessionId;
-    const timeoutMs = options?.timeoutMs ?? 30_000;
-
-    return new Promise<T>((resolve, reject) => {
-      const timer = timeoutMs > 0 ? setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, timeoutMs) : null;
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
-      this.ws.send(JSON.stringify(message));
-    });
-  }
-
-  close(): void {
-    try { this.ws.close(); } catch {}
-  }
-}
-
-function getScriptDir(): string {
-  return path.dirname(new URL(import.meta.url).pathname);
-}
-
-function copyImageToClipboard(imagePath: string): boolean {
-  const copyScript = path.join(getScriptDir(), 'copy-to-clipboard.ts');
-  const result = spawnSync('npx', ['-y', 'bun', copyScript, 'image', imagePath], { stdio: 'inherit' });
-  return result.status === 0;
-}
-
-function copyHtmlToClipboard(htmlPath: string): boolean {
-  const copyScript = path.join(getScriptDir(), 'copy-to-clipboard.ts');
-  const result = spawnSync('npx', ['-y', 'bun', copyScript, 'html', '--file', htmlPath], { stdio: 'inherit' });
-  return result.status === 0;
-}
-
-function pasteFromClipboard(targetApp?: string, retries = 3, delayMs = 500): boolean {
-  const pasteScript = path.join(getScriptDir(), 'paste-from-clipboard.ts');
-  const args = ['npx', '-y', 'bun', pasteScript, '--retries', String(retries), '--delay', String(delayMs)];
-  if (targetApp) {
-    args.push('--app', targetApp);
-  }
-  const result = spawnSync(args[0]!, args.slice(1), { stdio: 'inherit' });
-  return result.status === 0;
-}
-
 interface ArticleOptions {
   markdownPath: string;
   coverImage?: string;
@@ -225,7 +79,7 @@ export async function publishArticle(options: ArticleOptions): Promise<void> {
   await writeFile(htmlPath, parsed.html, 'utf-8');
   console.log(`[x-article] HTML saved to: ${htmlPath}`);
 
-  const chromePath = options.chromePath ?? findChromeExecutable();
+  const chromePath = options.chromePath ?? findChromeExecutable(CHROME_CANDIDATES_BASIC);
   if (!chromePath) throw new Error('Chrome not found');
 
   await mkdir(profileDir, { recursive: true });
@@ -246,7 +100,7 @@ export async function publishArticle(options: ArticleOptions): Promise<void> {
 
   try {
     const wsUrl = await waitForChromeDebugPort(port, 30_000);
-    cdp = await CdpConnection.connect(wsUrl, 30_000);
+    cdp = await CdpConnection.connect(wsUrl, 30_000, { defaultTimeoutMs: 30_000 });
 
     // Get page target
     const targets = await cdp.send<{ targetInfos: Array<{ targetId: string; url: string; type: string }> }>('Target.getTargets');
