@@ -2,6 +2,21 @@
 
 [English](./CHANGELOG.md) | 中文
 
+## 1.19.0 - 2026-01-24
+
+### 新功能
+- `baoyu-comic`：新增部分工作流选项——`--storyboard-only`、`--prompts-only`、`--images-only` 和 `--regenerate N`，实现灵活的工作流控制。
+- `baoyu-image-gen`：新增 `--imageSize` 参数用于 Google 提供商（1K/2K/4K），默认质量改为 2k。
+- `baoyu-image-gen`：新增 `GEMINI_API_KEY` 作为 `GOOGLE_API_KEY` 的别名。
+
+### 重构
+- `baoyu-comic`：将详细工作流提取至 `references/workflow.md`，SKILL.md 减少约 400 行，功能完整保留。
+- `baoyu-comic`：将内容信号分析提取至 `references/auto-selection.md`，部分工作流文档提取至 `references/partial-workflows.md`。
+- `baoyu-image-gen`：代码模块化——类型定义提取至 `types.ts`，provider 实现提取至 `providers/google.ts` 和 `providers/openai.ts`。
+
+### 文档
+- `baoyu-comic`：改进 ohmsha 预设文档，明确默认哆啦A梦角色定义和视觉描述。
+
 ## 1.18.3 - 2026-01-23
 
 ### 文档

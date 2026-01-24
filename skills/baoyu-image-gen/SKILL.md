@@ -76,7 +76,8 @@ npx -y bun ${SKILL_DIR}/scripts/main.ts --prompt "A cat" --image out.png --provi
 | `--model <id>`, `-m` | Model ID |
 | `--ar <ratio>` | Aspect ratio (e.g., `16:9`, `1:1`, `4:3`) |
 | `--size <WxH>` | Size (e.g., `1024x1024`) |
-| `--quality normal\|2k` | Quality preset (default: normal) |
+| `--quality normal\|2k` | Quality preset (default: 2k) |
+| `--imageSize 1K\|2K\|4K` | Image size for Google (default: from quality) |
 | `--ref <files...>` | Reference images (Google multimodal only) |
 | `--n <count>` | Number of images |
 | `--json` | JSON output |
@@ -102,17 +103,20 @@ npx -y bun ${SKILL_DIR}/scripts/main.ts --prompt "A cat" --image out.png --provi
 
 ## Quality Presets
 
-| Preset | Resolution | Use Case |
-|--------|------------|----------|
-| `normal` | ~1024px | Covers, illustrations |
-| `2k` | ~2048px | Infographics, slides |
+| Preset | Google imageSize | OpenAI Size | Use Case |
+|--------|------------------|-------------|----------|
+| `normal` | 1K | 1024px | Quick previews |
+| `2k` (default) | 2K | 2048px | Covers, illustrations, infographics |
+
+**Google imageSize**: Can be overridden with `--imageSize 1K|2K|4K`
 
 ## Aspect Ratios
 
 Supported: `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `2.35:1`
 
-- Multimodal models: embedded in prompt
-- Image-only models: uses `aspectRatio` or `size` parameter
+- Google multimodal: uses `imageConfig.aspectRatio`
+- Google Imagen: uses `aspectRatio` parameter
+- OpenAI: maps to closest supported size
 
 ## Error Handling
 

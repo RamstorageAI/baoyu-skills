@@ -2,6 +2,21 @@
 
 English | [中文](./CHANGELOG.zh.md)
 
+## 1.19.0 - 2026-01-24
+
+### Features
+- `baoyu-comic`: adds partial workflow options—`--storyboard-only`, `--prompts-only`, `--images-only`, and `--regenerate N` for flexible workflow control.
+- `baoyu-image-gen`: adds `--imageSize` parameter for Google providers (1K/2K/4K), changes default quality to 2k.
+- `baoyu-image-gen`: adds `GEMINI_API_KEY` as alias for `GOOGLE_API_KEY`.
+
+### Refactor
+- `baoyu-comic`: extracts detailed workflow to `references/workflow.md`, reduces SKILL.md by ~400 lines while preserving functionality.
+- `baoyu-comic`: extracts content signal analysis to `references/auto-selection.md` and partial workflow docs to `references/partial-workflows.md`.
+- `baoyu-image-gen`: modularizes code—extracts types to `types.ts`, provider implementations to `providers/google.ts` and `providers/openai.ts`.
+
+### Documentation
+- `baoyu-comic`: improves ohmsha preset documentation with explicit default Doraemon character definitions and visual descriptions.
+
 ## 1.18.3 - 2026-01-23
 
 ### Documentation

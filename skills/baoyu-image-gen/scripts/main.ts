@@ -1,34 +1,8 @@
-import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { homedir } from "node:os";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-
-type Provider = "google" | "openai";
-type Quality = "normal" | "2k";
-
-type CliArgs = {
-  prompt: string | null;
-  promptFiles: string[];
-  imagePath: string | null;
-  provider: Provider | null;
-  model: string | null;
-  aspectRatio: string | null;
-  size: string | null;
-  quality: Quality;
-  referenceImages: string[];
-  n: number;
-  json: boolean;
-  help: boolean;
-};
-
-const GOOGLE_MULTIMODAL_MODELS = [
-  "gemini-3-pro-image-preview",
-];
-
-const GOOGLE_IMAGEN_MODELS = ["imagen-3.0-generate-002", "imagen-3.0-generate-001"];
-
-const OPENAI_IMAGE_MODELS = ["gpt-image-1.5", "gpt-image-1", "dall-e-3", "dall-e-2"];
+import type { CliArgs, Provider } from "./types";
 
 function printUsage(): void {
   console.log(`Usage:
@@ -44,7 +18,8 @@ Options:
   -m, --model <id>          Model ID
   --ar <ratio>              Aspect ratio (e.g., 16:9, 1:1, 4:3)
   --size <WxH>              Size (e.g., 1024x1024)
-  --quality normal|2k       Quality preset (default: normal)
+  --quality normal|2k       Quality preset (default: 2k)
+  --imageSize 1K|2K|4K      Image size for Google (default: from quality)
   --ref <files...>          Reference images (Google multimodal only)
   --n <count>               Number of images (default: 1)
   --json                    JSON output
@@ -53,6 +28,7 @@ Options:
 Environment variables:
   OPENAI_API_KEY            OpenAI API key
   GOOGLE_API_KEY            Google API key
+  GEMINI_API_KEY            Gemini API key (alias for GOOGLE_API_KEY)
   OPENAI_IMAGE_MODEL        Default OpenAI model (gpt-image-1.5)
   GOOGLE_IMAGE_MODEL        Default Google model (gemini-3-pro-image-preview)
   OPENAI_BASE_URL           Custom OpenAI endpoint
@@ -70,7 +46,8 @@ function parseArgs(argv: string[]): CliArgs {
     model: null,
     aspectRatio: null,
     size: null,
-    quality: "normal",
+    quality: "2k",
+    imageSize: null,
     referenceImages: [],
     n: 1,
     json: false,
@@ -158,6 +135,13 @@ function parseArgs(argv: string[]): CliArgs {
       const v = argv[++i];
       if (v !== "normal" && v !== "2k") throw new Error(`Invalid quality: ${v}`);
       out.quality = v;
+      continue;
+    }
+
+    if (a === "--imageSize") {
+      const v = argv[++i]?.toUpperCase();
+      if (v !== "1K" && v !== "2K" && v !== "4K") throw new Error(`Invalid imageSize: ${v}`);
+      out.imageSize = v;
       continue;
     }
 
@@ -257,7 +241,7 @@ function normalizeOutputImagePath(p: string): string {
 function detectProvider(args: CliArgs): Provider {
   if (args.provider) return args.provider;
 
-  const hasGoogle = !!process.env.GOOGLE_API_KEY;
+  const hasGoogle = !!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
   const hasOpenai = !!process.env.OPENAI_API_KEY;
 
   if (hasGoogle && !hasOpenai) return "google";
@@ -265,235 +249,21 @@ function detectProvider(args: CliArgs): Provider {
   if (hasGoogle && hasOpenai) return "google";
 
   throw new Error(
-    "No API key found. Set GOOGLE_API_KEY or OPENAI_API_KEY.\n" +
+    "No API key found. Set GOOGLE_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY.\n" +
       "Create ~/.baoyu-skills/.env or <cwd>/.baoyu-skills/.env with your keys."
   );
 }
 
-function getDefaultModel(provider: Provider): string {
+type ProviderModule = {
+  getDefaultModel: () => string;
+  generateImage: (prompt: string, model: string, args: CliArgs) => Promise<Uint8Array>;
+};
+
+async function loadProviderModule(provider: Provider): Promise<ProviderModule> {
   if (provider === "google") {
-    return process.env.GOOGLE_IMAGE_MODEL || "gemini-3-pro-image-preview";
+    return (await import("./providers/google")) as ProviderModule;
   }
-  return process.env.OPENAI_IMAGE_MODEL || "gpt-image-1.5";
-}
-
-function isGoogleMultimodal(model: string): boolean {
-  return GOOGLE_MULTIMODAL_MODELS.some((m) => model.includes(m));
-}
-
-function isGoogleImagen(model: string): boolean {
-  return GOOGLE_IMAGEN_MODELS.some((m) => model.includes(m));
-}
-
-function buildPromptWithAspect(prompt: string, ar: string | null, quality: Quality): string {
-  let result = prompt;
-  if (ar) {
-    result += ` Aspect ratio: ${ar}.`;
-  }
-  if (quality === "2k") {
-    result += " High resolution 2048px.";
-  }
-  return result;
-}
-
-function parseAspectRatio(ar: string): { width: number; height: number } | null {
-  const match = ar.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
-  if (!match) return null;
-  const w = parseFloat(match[1]!);
-  const h = parseFloat(match[2]!);
-  if (w <= 0 || h <= 0) return null;
-  return { width: w, height: h };
-}
-
-function getOpenAISize(ar: string | null, quality: Quality): string {
-  const base = quality === "2k" ? 2048 : 1024;
-
-  if (!ar) return `${base}x${base}`;
-
-  const parsed = parseAspectRatio(ar);
-  if (!parsed) return `${base}x${base}`;
-
-  const ratio = parsed.width / parsed.height;
-
-  if (Math.abs(ratio - 1) < 0.1) return `${base}x${base}`;
-  if (ratio > 1.5) return quality === "2k" ? "2048x1024" : "1792x1024";
-  if (ratio < 0.67) return quality === "2k" ? "1024x2048" : "1024x1792";
-  return `${base}x${base}`;
-}
-
-async function readImageAsBase64(p: string): Promise<{ data: string; mimeType: string }> {
-  const buf = await readFile(p);
-  const ext = path.extname(p).toLowerCase();
-  let mimeType = "image/png";
-  if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
-  else if (ext === ".gif") mimeType = "image/gif";
-  else if (ext === ".webp") mimeType = "image/webp";
-  return { data: buf.toString("base64"), mimeType };
-}
-
-async function generateWithGoogleMultimodal(
-  prompt: string,
-  model: string,
-  args: CliArgs
-): Promise<Uint8Array> {
-  const { generateText } = await import("ai");
-  const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-
-  const google = createGoogleGenerativeAI({
-    apiKey: process.env.GOOGLE_API_KEY,
-    baseURL: process.env.GOOGLE_BASE_URL,
-  });
-
-  const fullPrompt = buildPromptWithAspect(prompt, args.aspectRatio, args.quality);
-
-  const messages: any[] = [];
-  const content: any[] = [];
-
-  for (const refPath of args.referenceImages) {
-    const { data, mimeType } = await readImageAsBase64(refPath);
-    content.push({ type: "image", image: data, mimeType });
-  }
-  content.push({ type: "text", text: fullPrompt });
-
-  messages.push({ role: "user", content });
-
-  const result = await generateText({
-    model: google(model, { useSearchGrounding: false }),
-    messages,
-    providerOptions: {
-      google: {
-        responseModalities: ["TEXT", "IMAGE"],
-      },
-    },
-  });
-
-  const files = (result as any).files;
-  if (!files || files.length === 0) {
-    const expRes = (result as any).response?.body?.candidates?.[0]?.content?.parts;
-    if (expRes) {
-      for (const part of expRes) {
-        if (part.inlineData?.data) {
-          return Uint8Array.from(Buffer.from(part.inlineData.data, "base64"));
-        }
-      }
-    }
-    throw new Error("No image in response");
-  }
-
-  const img = files[0];
-  if (img.uint8Array) return img.uint8Array;
-  if (img.base64) return Uint8Array.from(Buffer.from(img.base64, "base64"));
-
-  throw new Error("Cannot extract image data");
-}
-
-async function generateWithGoogleImagen(
-  prompt: string,
-  model: string,
-  args: CliArgs
-): Promise<Uint8Array> {
-  const { experimental_generateImage: generateImage } = await import("ai");
-  const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-
-  const google = createGoogleGenerativeAI({
-    apiKey: process.env.GOOGLE_API_KEY,
-    baseURL: process.env.GOOGLE_BASE_URL,
-  });
-
-  const fullPrompt = buildPromptWithAspect(prompt, args.aspectRatio, args.quality);
-
-  const result = await generateImage({
-    model: google.image(model),
-    prompt: fullPrompt,
-    n: args.n,
-    aspectRatio: args.aspectRatio || undefined,
-  });
-
-  const img = result.images[0];
-  if (!img) throw new Error("No image in response");
-
-  if (img.uint8Array) return img.uint8Array;
-  if (img.base64) return Uint8Array.from(Buffer.from(img.base64, "base64"));
-
-  throw new Error("Cannot extract image data");
-}
-
-async function generateWithOpenAI(
-  prompt: string,
-  model: string,
-  args: CliArgs
-): Promise<Uint8Array> {
-  const baseURL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) throw new Error("OPENAI_API_KEY is required");
-
-  const size = args.size || getOpenAISize(args.aspectRatio, args.quality);
-
-  const body: Record<string, any> = {
-    model,
-    prompt,
-    size,
-  };
-
-  if (model.includes("dall-e-3")) {
-    body.quality = args.quality === "2k" ? "hd" : "standard";
-  }
-
-  const res = await fetch(`${baseURL}/images/generations`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`OpenAI API error: ${err}`);
-  }
-
-  const result = (await res.json()) as { data: Array<{ url?: string; b64_json?: string }> };
-  const img = result.data[0];
-
-  if (img?.b64_json) {
-    return Uint8Array.from(Buffer.from(img.b64_json, "base64"));
-  }
-
-  if (img?.url) {
-    const imgRes = await fetch(img.url);
-    if (!imgRes.ok) throw new Error("Failed to download image");
-    const buf = await imgRes.arrayBuffer();
-    return new Uint8Array(buf);
-  }
-
-  throw new Error("No image in response");
-}
-
-async function generate(
-  provider: Provider,
-  model: string,
-  prompt: string,
-  args: CliArgs
-): Promise<Uint8Array> {
-  if (provider === "google") {
-    if (isGoogleMultimodal(model)) {
-      return generateWithGoogleMultimodal(prompt, model, args);
-    }
-    if (isGoogleImagen(model)) {
-      if (args.referenceImages.length > 0) {
-        console.error("Warning: Reference images not supported with Imagen models, ignoring.");
-      }
-      return generateWithGoogleImagen(prompt, model, args);
-    }
-    return generateWithGoogleMultimodal(prompt, model, args);
-  }
-
-  if (args.referenceImages.length > 0) {
-    console.error("Warning: Reference images not supported with OpenAI, ignoring.");
-  }
-  return generateWithOpenAI(prompt, model, args);
+  return (await import("./providers/openai")) as ProviderModule;
 }
 
 async function main(): Promise<void> {
@@ -525,7 +295,8 @@ async function main(): Promise<void> {
   }
 
   const provider = detectProvider(args);
-  const model = args.model || getDefaultModel(provider);
+  const providerModule = await loadProviderModule(provider);
+  const model = args.model || providerModule.getDefaultModel();
   const outputPath = normalizeOutputImagePath(args.imagePath);
 
   let imageData: Uint8Array;
@@ -533,7 +304,7 @@ async function main(): Promise<void> {
 
   while (true) {
     try {
-      imageData = await generate(provider, model, prompt, args);
+      imageData = await providerModule.generateImage(prompt, model, args);
       break;
     } catch (e) {
       if (!retried) {
