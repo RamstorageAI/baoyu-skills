@@ -186,18 +186,61 @@ Japanese (CHANGELOG.ja.md):
 - コネクションプールのメモリリークを修正
 ```
 
-### Step 5: Check README Updates
+### Step 5: Group Changes by Skill/Module
 
-**IMPORTANT**: Before updating version file, check if README needs updates.
+Analyze commits since last tag and group by affected skill/module:
 
-1. **Scan for README files**: `README*.md` in project root
-2. **For each skill/feature changed**, check if README documentation matches:
-   - Options/flags documented correctly
-   - Usage examples reflect current syntax
-   - Feature descriptions are accurate
-3. **If README is outdated**:
-   - Update README.md (and README.zh.md if exists) to reflect changes
-   - Include in release commit
+1. **Identify changed files** per commit
+2. **Group by skill/module**:
+   - `skills/<skill-name>/*` → Group under that skill
+   - Root files (CLAUDE.md, etc.) → Group as "project"
+   - Multiple skills in one commit → Split into multiple groups
+3. **For each group**, identify related README updates needed
+
+**Example Grouping**:
+```
+baoyu-cover-image:
+  - feat: add new style options
+  - fix: handle transparent backgrounds
+  → README updates: options table
+
+baoyu-comic:
+  - refactor: improve panel layout algorithm
+  → No README updates needed
+
+project:
+  - docs: update CLAUDE.md architecture section
+```
+
+### Step 6: Commit Each Skill/Module Separately
+
+For each skill/module group (in order of changes):
+
+1. **Check README updates needed**:
+   - Scan `README*.md` for mentions of this skill/module
+   - Verify options/flags documented correctly
+   - Update usage examples if syntax changed
+   - Update feature descriptions if behavior changed
+
+2. **Stage and commit**:
+   ```bash
+   git add skills/<skill-name>/*
+   git add README.md README.zh.md  # If updated for this skill
+   git commit -m "<type>(<skill-name>): <meaningful description>"
+   ```
+
+3. **Commit message format**:
+   - Use conventional commit format: `<type>(<scope>): <description>`
+   - `<type>`: feat, fix, refactor, docs, perf, etc.
+   - `<scope>`: skill name or "project"
+   - `<description>`: Clear, meaningful description of changes
+
+**Example Commits**:
+```bash
+git commit -m "feat(baoyu-cover-image): add watercolor and minimalist styles"
+git commit -m "fix(baoyu-comic): improve panel layout for long dialogues"
+git commit -m "docs(project): update architecture documentation"
+```
 
 **Common README Updates Needed**:
 | Change Type | README Section to Check |
@@ -208,11 +251,13 @@ Japanese (CHANGELOG.ja.md):
 | Breaking changes | Migration notes, deprecation warnings |
 | Restructured internals | Architecture section (if exposed to users) |
 
-### Step 6: Update Version File
+### Step 7: Generate Changelog and Update Version
 
-1. Read version file (JSON/TOML/text)
-2. Update version number
-3. Write back (preserve formatting)
+1. **Generate multi-language changelogs** (as described in Step 4)
+2. **Update version file**:
+   - Read version file (JSON/TOML/text)
+   - Update version number
+   - Write back (preserve formatting)
 
 **Version Paths by File Type**:
 
@@ -224,25 +269,77 @@ Japanese (CHANGELOG.ja.md):
 | marketplace.json | `$.metadata.version` |
 | VERSION / version.txt | Direct content |
 
-### Step 7: Commit and Tag
+### Step 8: User Confirmation
 
-```bash
-git add <all modified files>
-git commit -m "chore: release v{VERSION}"
-git tag v{VERSION}
+Before creating the release commit, ask user to confirm:
+
+**Use AskUserQuestion with two questions**:
+
+1. **Version bump** (single select):
+   - Show recommended version based on Step 3 analysis
+   - Options: recommended (with label), other semver options
+   - Example: `1.2.3 → 1.3.0 (Recommended)`, `1.2.3 → 1.2.4`, `1.2.3 → 2.0.0`
+
+2. **Push to remote** (single select):
+   - Options: "Yes, push after commit", "No, keep local only"
+
+**Example Output Before Confirmation**:
 ```
+Commits created:
+  1. feat(baoyu-cover-image): add watercolor and minimalist styles
+  2. fix(baoyu-comic): improve panel layout for long dialogues
+  3. docs(project): update architecture documentation
+
+Changelog preview (en):
+  ## 1.3.0 - 2026-01-22
+  ### Features
+  - Add watercolor and minimalist styles to cover-image
+  ### Fixes
+  - Improve panel layout for long dialogues in comic
+
+Ready to create release commit and tag.
+```
+
+### Step 9: Create Release Commit and Tag
+
+After user confirmation:
+
+1. **Stage version and changelog files**:
+   ```bash
+   git add <version-file>
+   git add CHANGELOG*.md
+   ```
+
+2. **Create release commit**:
+   ```bash
+   git commit -m "chore: release v{VERSION}"
+   ```
+
+3. **Create tag**:
+   ```bash
+   git tag v{VERSION}
+   ```
+
+4. **Push if user confirmed** (Step 8):
+   ```bash
+   git push origin main
+   git push origin v{VERSION}
+   ```
 
 **Note**: Do NOT add Co-Authored-By line. This is a release commit, not a code contribution.
 
-**Important**: Do NOT push to remote. User will push manually when ready.
-
 **Post-Release Output**:
 ```
-Release v1.3.0 created locally.
+Release v1.3.0 created.
 
-To publish:
-  git push origin main
-  git push origin v1.3.0
+Commits:
+  1. feat(baoyu-cover-image): add watercolor and minimalist styles
+  2. fix(baoyu-comic): improve panel layout for long dialogues
+  3. docs(project): update architecture documentation
+  4. chore: release v1.3.0
+
+Tag: v1.3.0
+Status: Pushed to origin  # or "Local only - run git push when ready"
 ```
 
 ## Configuration (.releaserc.yml)
@@ -307,31 +404,36 @@ Project detected:
 Last tag: v1.2.3
 Proposed version: v1.3.0
 
-Changes detected:
-  feat: add user authentication
-  feat: support oauth2 login
-  fix: memory leak in pool
+Changes grouped by skill/module:
+  baoyu-cover-image:
+    - feat: add watercolor style
+    - feat: add minimalist style
+    → Commit: feat(baoyu-cover-image): add watercolor and minimalist styles
+    → README updates: options table
+
+  baoyu-comic:
+    - fix: panel layout for long dialogues
+    → Commit: fix(baoyu-comic): improve panel layout for long dialogues
+    → No README updates
 
 Changelog preview (en):
   ## 1.3.0 - 2026-01-22
   ### Features
-  - Add user authentication module
-  - Support OAuth2 login
+  - Add watercolor and minimalist styles to cover-image
   ### Fixes
-  - Fix memory leak in connection pool
+  - Improve panel layout for long dialogues in comic
 
 Changelog preview (zh):
   ## 1.3.0 - 2026-01-22
   ### 新功能
-  - 新增用户认证模块
-  - 支持 OAuth2 登录
+  - 为 cover-image 添加水彩和极简风格
   ### 修复
-  - 修复连接池内存泄漏问题
+  - 改进 comic 长对话的面板布局
 
-Files to modify:
-  - package.json
-  - CHANGELOG.md
-  - CHANGELOG.zh.md
+Commits to create:
+  1. feat(baoyu-cover-image): add watercolor and minimalist styles
+  2. fix(baoyu-comic): improve panel layout for long dialogues
+  3. chore: release v1.3.0
 
 No changes made. Run without --dry-run to execute.
 ```
