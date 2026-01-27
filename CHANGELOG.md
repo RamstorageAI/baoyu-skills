@@ -2,6 +2,11 @@
 
 English | [中文](./CHANGELOG.zh.md)
 
+## 1.23.1 - 2026-01-27
+
+### Fixes
+- `baoyu-compress-image`: rename original file as `_original` backup instead of deleting after compression.
+
 ## 1.23.0 - 2026-01-26
 
 ### Refactor
