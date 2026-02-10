@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 export type PlatformCandidates = {
   darwin?: string[];
@@ -216,7 +217,7 @@ export class CdpConnection {
 }
 
 export function getScriptDir(): string {
-  return path.dirname(new URL(import.meta.url).pathname);
+  return path.dirname(fileURLToPath(import.meta.url));
 }
 
 function runBunScript(scriptPath: string, args: string[]): boolean {
