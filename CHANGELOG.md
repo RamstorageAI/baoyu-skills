@@ -2,6 +2,16 @@
 
 English | [中文](./CHANGELOG.zh.md)
 
+## 1.32.0 - 2026-02-12
+
+### Features
+- `baoyu-danger-x-to-markdown`: add `--download-media` flag to download images/videos locally and rewrite markdown links to relative paths; add media localization module; add first-time setup with EXTEND.md preferences; add `coverImage` to frontmatter output.
+
+### Refactor
+- `baoyu-danger-x-to-markdown`: use camelCase for frontmatter keys (`tweetCount`, `coverImage`, `requestedUrl`, etc.).
+- `baoyu-format-markdown`: rename `featureImage` to `coverImage` as primary frontmatter key (with `featureImage` as accepted alias).
+- `baoyu-post-to-wechat`: prioritize `coverImage` over `featureImage` in cover image frontmatter lookup order.
+
 ## 1.31.2 - 2026-02-10
 
 ### Fixes

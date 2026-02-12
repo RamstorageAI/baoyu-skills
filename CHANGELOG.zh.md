@@ -2,6 +2,16 @@
 
 [English](./CHANGELOG.md) | 中文
 
+## 1.32.0 - 2026-02-12
+
+### 新功能
+- `baoyu-danger-x-to-markdown`：新增 `--download-media` 参数，支持将图片/视频下载到本地并将 markdown 链接改写为相对路径；新增媒体本地化模块；新增首次使用 EXTEND.md 偏好设置；在 frontmatter 中输出 `coverImage`。
+
+### 重构
+- `baoyu-danger-x-to-markdown`：frontmatter 字段改为 camelCase（`tweetCount`、`coverImage`、`requestedUrl` 等）。
+- `baoyu-format-markdown`：将主 frontmatter 字段从 `featureImage` 更名为 `coverImage`（兼容 `featureImage`）。
+- `baoyu-post-to-wechat`：封面图片 frontmatter 查找顺序中优先使用 `coverImage`。
+
 ## 1.31.2 - 2026-02-10
 
 ### 修复
